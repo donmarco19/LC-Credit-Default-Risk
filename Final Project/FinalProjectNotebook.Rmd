@@ -1,0 +1,684 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+library(ggplot2)
+library(reshape2)
+```
+
+```{r}
+loan = read.csv("./loan.csv")
+```
+
+```{r}
+boxplot(loan$int_rate~loan$grade, main = "Interest Rate vs Loan Grade", xlab = "Grade", ylab = "Interest Rate")
+```
+
+```{r}
+NAs <- loan[,colSums(is.na(loan)) >  nrow(loan)*.9]
+colnames(NAs)
+```
+
+```{r}
+levels(loan$loan_status)
+```
+
+Since we want to predict "Default" or "Charged Off" vs "Fully Paid", we can ignore the others for the time being.
+```{r}
+new_data = loan[loan$loan_status %in% c("Default", "Charged Off", "Fully Paid"),]
+new_data$loan_status = droplevels(new_data$loan_status, c("Current", "Does not meet the credit policy. Status:Charged Off", "Does not meet the credit policy. Status:Fully Paid", "In Grace Period", "Issued", "Late (16-30 days)", "Late (31-120 days)"))
+dim(new_data)
+```
+
+```{r}
+new_data$loan_status_numeric = ifelse(new_data$loan_status == "Fully Paid", 0, 1)
+```
+
+```{r}
+levels(new_data$loan_status) = c("Default", "Default", "Fully Paid")
+levels(new_data$loan_status)
+```
+
+```{r}
+plot(new_data$annual_inc, new_data$loan_amnt, col = ifelse(new_data$loan_status == "Fully Paid", "blue", "red"))
+```
+
+```{r}
+counts <- table(new_data$loan_status, new_data$purpose)
+barplot(counts, main="Loan Purpose and Status",
+  col=c("salmon", "navy"),
+ 	legend = rownames(counts), las = 2)
+```
+
+```{r}
+nrow(new_data[new_data$loan_status_numeric == 1,]) / nrow(new_data)
+nrow(new_data[new_data$loan_status_numeric == 0,]) / nrow(new_data)
+```
+
+
+```{r}
+counts <- table(new_data$loan_status, new_data$grade)
+barplot(counts, main="Loan Grade and Status",
+  col=c("salmon", "navy"),
+ 	legend = rownames(counts), las = 1)
+```
+
+```{r}
+boxplot(new_data$int_rate ~ new_data$loan_status, col = c("salmon", "slateblue"))
+```
+
+```{r}
+p <- ggplot(new_data, aes(x=loan_status, y=int_rate, fill=loan_status)) + geom_violin() + geom_boxplot(width=0.15)
+p
+```
+
+
+```{r}
+numerics = new_data[,unlist(lapply(new_data, is.numeric))]
+cormat <- round(cor(numerics),2)
+head(cormat)
+```
+
+```{r}
+melted_cormat <- melt(cormat)
+head(melted_cormat)
+```
+
+```{r}
+ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile()
+```
+
+
+```{r}
+plot(new_data$total_acc, new_data$tot_cur_bal, col = ifelse(new_data$loan_status == "Fully Paid", "slateblue", "lightskyblue"), pch = 19)
+```
+
+
+```{r}
+missings <- numerics[,colSums(is.na(numerics)) >  nrow(numerics)*.7]
+colnames(missings)
+numerics2 = numerics[,-which(colnames(numerics) %in% colnames(missings))]
+numerics2 = numerics2[complete.cases(numerics2),]
+test_pca = prcomp(numerics2)
+```
+
+```{r}
+plot(c(1:(nrow(test_pca$x))), test_pca$x[,1], col=ifelse(new_data$loan_status == "Fully Paid", "deepskyblue", "orange"), pch = 19)
+```
+
+```{r}
+library(caret)
+```
+
+```{r}
+missings <- new_data[,colSums(is.na(new_data)) >  nrow(new_data)*.7]
+colnames(missings)
+new_data2 = new_data[,-which(colnames(new_data) %in% colnames(missings))]
+new_data2 = new_data2[complete.cases(new_data2),]
+```
+
+
+```{r}
+reduced_data = new_data2[,c(3:30, ncol(new_data2))]
+reduced_data$mths_since_last_delinq = NULL
+#sapply(reduced_data, is.factor)
+#reduced_data
+fit = glm(formula = loan_status_numeric ~ ., data = reduced_data, family = "binomial")
+```
+
+```{r}
+fit
+```
+
+
+```{r}
+grid2 = expand.grid(1, seq(0,100,by=1))
+colnames(grid2) = c("alpha", "lambda")
+additive_model = train(loan_status_numeric ~ .,
+                   data = new_data2,
+                   method = 'glmnet',
+                   trControl = control,
+                   tuneGrid = grid2)
+```
+
+Need to handle imbalanced dataset by either 
+```{r}
+m = colnames(new_data[,colSums(is.na(new_data)) >  nrow(new_data)*0])
+dim(subset(new_data, select = m))
+
+m
+#summary(complete_loans)
+```
+
+```{r}
+missings <- numerics[,colSums(is.na(numerics)) >  nrow(numerics)*0]
+colnames(missings)
+numerics3 = numerics[,-which(colnames(numerics) %in% colnames(missings))]
+numerics3 = numerics3[,-which(colnames(numerics3) == "policy_code")]
+
+cormat <- round(cor(numerics3),2)
+head(cormat)
+```
+
+```{r}
+melted_cormat <- melt(cormat)
+head(melted_cormat)
+```
+
+```{r}
+ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile()
+```
+
+
+
+```{r}
+cols_to_drop = c("id", "member_id", "url", "emp_title", "desc", "title", "mths_since_last_delinq", "mths_since_last_record", "next_pymnt_d", "verification_status_joint", "policy_code", "annual_inc_joint", "dti_joint")
+
+new_data = new_data[, -which(colnames(new_data) %in% cols_to_drop)]
+dim(new_data)
+```
+
+*id*: This is a unique loan id local to the website, this has no impact on the loan itself.
+*member_id*: ID number of the user
+*url*: URL of the loan
+*emp_title*: We believe the variation of employers for each individual will be hard to gain any important information from. It is a categorical variable with tens of thousands of levels.
+*desc*: This is a user provided description of a loan, again, without some advanced analysis applied to the text, there is very little information we can gain from this.
+*title*: This is a user provided title of a loan, again, without some advanced analysis applied to the text, there is very little information we can gain from this.
+*mths_since_last_delinq*: Many of these values are empty, and we believe that other columns encode information about delinquencies without this level of granularity.
+*next_pymnt_d*: The next payment date is almost completely empty because we are considering completed loans, which have either been charged off/defaulted or paid in full.
+*verification_status_joint*: There is only one observation within our completed loans that indicates joint status, so we removed the columns pertaining to joint-specific accounts.
+*annual_inc_joint*: 
+*dti_joint*: 
+*policy_code*: All of the policy codes in our subset were the same.
+
+
+```{r}
+pca_colnames = c("loan_amnt", "funded_amnt", "funded_amnt_inv", "int_rate", "installment", "annual_inc", "dti", "inq_last_6mths", "mths_since_last_delinq", "mths_since_last_record", "open_acc", "revol_bal", "revol_util", "total_acc", "total_pymnt", "total_pymnt_inv", "total_rec_prncp","total_rec_int","recoveries","last_pymnt_amnt","collections_12_mths_ex_med","mths_since_last_major_derog","annual_inc_joint","dti_joint","tot_coll_amt","tot_cur_bal","open_acc_6m","open_il_6m","open_il_12m","open_il_24m","il_util","open_rv_12m","open_rv_24m","max_bal_bc","all_util","total_rev_hi_lim","inq_fi","total_cu_tl","inq_last_12m")
+
+colnames(new_data[,-which(colnames(new_data) %in% pca_colnames)])
+```
+
+```{r}
+pca_colnames[-which(pca_colnames %in% colnames(new_data))]
+#colnames(new_data[,-which(pca_colnames %in% pca_colnames)])
+```
+
+Bin date variables by year, convert to numeric:
+"last_credit_pull_d"
+"earliest_cr_line"
+"last_pymnt_d"
+
+```{r}
+new_data$last_credit_pull_yr = as.numeric(substr(new_data$last_credit_pull_d, 5,8))
+new_data$earliest_cr_line_yr = as.numeric(substr(new_data$earliest_cr_line, 5,8))
+new_data$last_pymnt_yr = as.numeric(substr(new_data$last_pymnt_d, 5,8))
+new_data$issue_yr = as.numeric(substr(new_data$issue_d, 5,8))
+```
+
+```{r}
+new_data$last_credit_pull_d = NULL
+new_data$earliest_cr_line = NULL
+new_data$last_pymnt_d = NULL
+new_data$issue_d = NULL
+```
+
+```{r}
+na_colnames = colnames(new_data[,which(colSums(is.na(new_data)) >  nrow(new_data)*0.81)])
+na_colnames
+```
+
+```{r}
+
+```
+
+
+```{r}
+#library("FactoMineR")
+numerics = new_data[,sapply(new_data, is.numeric)]
+dim(numerics)
+```
+
+```{r}
+colnames(numerics[,colSums(is.na(numerics)) > 0])
+```
+
+
+```{r}
+library(FactoMineR)
+library("factoextra")
+```
+
+```{r}
+numerics$loan_status_numeric = NULL
+numerics_no_na = numerics[,-which(colnames(numerics) %in% na_colnames)]
+#pca = PCA(numerics, scale.unit = TRUE)
+pca = PCA(numerics_no_na, scale.unit = TRUE)
+```
+
+```{r}
+summary(pca)
+```
+
+```{r}
+res.pca = PCA(numerics, graph = FALSE)
+```
+
+
+```{r}
+fviz_eig(pca, addlabels = TRUE)
+#fviz_eig(res.pca, addlabels = TRUE)
+```
+
+```{r}
+fviz_contrib(pca, choice = "var", axes = 1:3)
+```
+
+
+```{r}
+contrib_colnames = fviz_contrib(pca, choice = "var", axes = 1:3)$data$name
+contribs = fviz_contrib(pca, choice = "var", axes = 1:3)$data$contrib
+
+contrib_colnames = contrib_colnames[order(contribs, decreasing = TRUE)]
+contrib_colnames
+```
+
+```{r}
+top_15_colnames = contrib_colnames[1:15]
+top_15 = numerics[,which(colnames(numerics) %in% top_15_colnames)]
+top_15_colnames
+```
+
+```{r}
+categoricals = new_data[,sapply(new_data, is.factor)]
+colnames(categoricals)
+```
+
+```{r}
+categoricals$zip_code = NULL
+categoricals$application_type = NULL
+#categoricals$verification_status = NULL
+categoricals$loan_status = NULL
+categoricals$sub_grade = NULL
+categoricals$pymnt_plan = NULL
+```
+
+*zip_code*: Zip code data is too granular for our analysis, to capture locational information we can use state.
+*application_type*: all but one observation in our completed loans are "INDIVIDUAL", the single observation being "JOINT". This will not add any significant information with one observation.
+*sub_grade*: Sub grade data is too granular for our analysis, to capture loan quality information we can use "grade".
+*pymnt_plan*: Only two observations with value "y", the rest are "n"
+
+```{r}
+colnames(categoricals)
+```
+
+```{r}
+mca = MCA(categoricals)
+```
+
+```{r}
+fviz_eig(mca)
+```
+
+```{r}
+summary(mca)
+```
+
+```{r}
+colnames(categoricals)
+```
+
+```{r}
+fviz_contrib(mca, choice = "var", axes = 1:3, top = 30)
+```
+
+
+```{r}
+model_1_data = new_data[,which(colnames(new_data) %in% c(as.character(top_15_colnames), colnames(categoricals)))]
+colnames(model_1_data)
+```
+
+```{r}
+library(glmnet)
+```
+
+```{r}
+colnames(model_1_data[,colSums(is.na(model_1_data)) > 0])
+colSums(is.na(model_1_data))
+```
+
+```{r}
+model_1_data$total_rev_hi_lim = NULL
+model_1_data$last_pymnt_yr[is.na(model_1_data$last_pymnt_yr)] = mean(model_1_data$last_pymnt_yr, na.rm=TRUE)
+```
+
+```{r}
+colSums(is.na(model_1_data))
+which(is.na(as.matrix(model_1_data)))
+which(is.na(new_data$loan_status_numeric))
+```
+
+
+```{r}
+test_idx = sample(1:nrow(model_1_data),size = .2 * nrow(model_1_data))
+test = model_1_data[test_idx,]
+train = model_1_data[-test_idx,]
+#model_1_data$loan_status_numeric = new_data$loan_status_numeric
+#cv_fit_1 = cv.glmnet(model_1_data, new_data$loan_status_numeric, nfolds = 5)
+cv_fit_1 = glm(loan_status_numeric~., family = "binomial", data = train)
+```
+
+```{r}
+summary(cv_fit_1)
+```
+
+```{r}
+table(round(predict.glm(cv_fit_1, test, "response")))
+table(test$loan_status_numeric)
+```
+
+```{r}
+prior_prb = sum(test$loan_status_numeric) / nrow(test)
+```
+
+
+```{r}
+confusionMatrix(as.factor(ifelse(predict.glm(cv_fit_1, test, "response") > prior_prb, 1, 0)), reference = as.factor(test$loan_status_numeric))
+```
+
+```{r}
+library(ROCR)
+```
+
+```{r}
+pred1 = prediction(predict.glm(cv_fit_1, test, "response"), test$loan_status_numeric)
+perf1 = performance(pred1, "tpr", "fpr")
+plot(perf1)
+```
+
+```{r}
+sum(model_1_data$loan_status_numeric) / nrow(model_1_data)
+```
+
+```{r}
+test_idx = sample(1:nrow(model_1_data),size = .2 * nrow(model_1_data))
+test = model_1_data[test_idx,]
+train = model_1_data[-test_idx,]
+#model_1_data$loan_status_numeric = new_data$loan_status_numeric
+#cv_fit_1 = cv.glmnet(model_1_data, new_data$loan_status_numeric, nfolds = 5)
+wt = ifelse(train$loan_status_numeric, 1, 10)
+weighted_fit_1 = glm(loan_status_numeric~., family = "binomial", data = train, weights = wt)
+```
+
+```{r}
+confusionMatrix(as.factor(round(predict.glm(weighted_fit_1, test, "response"))), reference = as.factor(test$loan_status_numeric))
+```
+
+```{r}
+pred1 = prediction(predict.glm(weighted_fit_1, test, "response"), test$loan_status_numeric)
+perf1 = performance(pred1, "tpr", "fpr")
+plot(perf1)
+
+?roc.plot
+```
+
+```{r}
+library(plotROC)
+```
+
+```{r}
+confusionMatrix(as.factor(round(predict.glm(cv_fit_1, test, "response"))), reference = as.factor(test$loan_status_numeric))
+```
+
+
+```{r}
+roc_data = cbind.data.frame(test$loan_status_numeric, predict(cv_fit_1, test))
+colnames(roc_data) = c('y', 'p')
+basicplot <- ggplot(roc_data, aes(d = y, m = p)) + geom_roc()
+basicplot
+```
+
+
+```{r}
+library(caret)
+```
+
+```{r}
+library(reshape2)
+```
+
+
+```{r}
+mod_1_numerics = model_1_data[,sapply(model_1_data, is.numeric)]
+cormat <- round(cor(mod_1_numerics),2)
+melted_cormat <- melt(cormat)
+head(melted_cormat)
+```
+
+```{r}
+ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile()
+```
+
+Claim high correlation, use it to motivate Ridge Regression tuned by "caret" package.
+
+```{r}
+prb_default = sum(train$loan_status_numeric) / nrow(train)
+```
+
+```{r}
+caret_model_data = model_1_data
+caret_model_data$loan_status_numeric = as.factor(model_1_data$loan_status_numeric)
+levels(caret_model_data$loan_status_numeric) = c("good", "bad")
+c_test_idx = sample(1:nrow(caret_model_data),size = .2 * nrow(caret_model_data))
+c_test = caret_model_data[c_test_idx,]
+c_train = caret_model_data[-c_test_idx,]
+```
+
+```{r}
+createDataPartition()
+```
+
+
+```{r}
+control = trainControl(method = "cv", number = 5, verboseIter = TRUE, classProbs = TRUE)
+grid = expand.grid(0, seq(0,1,by=1)) # Using ridge reg
+colnames(grid) = c("alpha", "lambda")
+
+ridgeFit1 <- train(loan_status_numeric ~ ., data = c_train, method = 'glmnet', 
+                  preProc = c("center", "scale"), metric = "ROC", 
+                  trControl = control)#, 
+                  #tuneGrid = grid)
+plot(ridgeFit1)
+```
+
+```{r}
+#coef(ridgeFit1$finalModel, ridgeFit1$bestTune$.lambda)
+confusionMatrix(as.factor(round(predict(ridgeFit1, newdata = test, type = "prob"))$bad), reference = as.factor(test$loan_status_numeric))
+```
+
+```{r}
+colnames(c_train)
+```
+
+
+```{r}
+# 3-fold CV for computational cost
+control = trainControl(method = "cv", number = 3, verboseIter = TRUE, classProbs = TRUE)
+grid = expand.grid(0, seq(0,10,by=1)) # Using ridge reg
+colnames(grid) = c("alpha", "lambda")
+
+ridgeFit <- train(loan_status_numeric ~ ., data = c_train, method = 'glmnet', 
+                  family = "binomial",
+                  preProc = c("center", "scale"), metric = "ROC", 
+                  trControl = control, 
+                  tuneGrid = grid)
+plot(ridgeFit)
+```
+
+```{r}
+# 3-fold CV for computational cost
+control = trainControl(method = "cv", number = 3, verboseIter = TRUE, classProbs = TRUE)
+grid = expand.grid(0, seq(0,1,by=.1)) # Using ridge reg
+colnames(grid) = c("alpha", "lambda")
+
+ridgeFit2 <- train(loan_status_numeric ~ ., data = c_train, method = 'glmnet', 
+                  family = "binomial",
+                  preProc = c("center", "scale"), metric = "kappa", 
+                  trControl = control, 
+                  tuneGrid = grid)
+plot(ridgeFit)
+```
+
+```{r}
+confusionMatrix(as.factor(ifelse(predict(ridgeFit2, newdata = c_test, type = "prob")$bad > prb_default, "bad", "good")), reference = c_test$loan_status_numeric)
+```
+
+```{r}
+# 3-fold CV for computational cost
+#note that this was trained with a larger range of lambdas, but it was reduced since smaller values were chosen
+control = trainControl(method = "cv", number = 3, verboseIter = TRUE, classProbs = TRUE)
+grid = expand.grid(seq(0,1,by=.1)) # Using ridge reg
+colnames(grid) = c("lambda")
+ridge_train = c_train
+ridge_train$loan_status_numeric = as.numeric(ifelse(ridge_train$loan_status_numeric == "bad", 1, 0))
+ridgeFit3 <- train(loan_status_numeric ~ ., data = ridge_train, method = 'ridge', 
+                  family = "binomial",
+                  preProc = c("center", "scale"), #metric = "kappa", 
+                  trControl = control, 
+                  tuneGrid = grid)
+plot(ridgeFit)
+```
+
+```{r}
+prb_default
+```
+
+
+```{r}
+confusionMatrix(as.factor(ifelse(predict(ridgeFit3, newdata = c_test) > prb_default, "bad", "good")), reference = c_test$loan_status_numeric)
+```
+
+
+```{r}
+# 3-fold CV for computational cost
+control = trainControl(method = "cv", number = 3, verboseIter = TRUE, classProbs = TRUE)
+grid = expand.grid(1, seq(0,10,by=1)) # Using lasso reg
+colnames(grid) = c("alpha", "lambda")
+
+lassoFit <- train(loan_status_numeric ~ ., data = c_train, method = 'glmnet', 
+                  family = "binomial",
+                  preProc = c("center", "scale"), metric = "kappa", 
+                  trControl = control, 
+                  tuneGrid = grid)
+plot(lassoFit)
+```
+
+```{r}
+confusionMatrix(as.factor(ifelse(predict(lassoFit, newdata = c_test, type = "prob")$bad > prb_default, "bad", "good")), reference = c_test$loan_status_numeric)
+```
+
+
+
+```{r}
+pred1 = prediction(predict(ridgeFit1, newdata = c_test, type = "prob")$good, c_test$loan_status_numeric)
+perf1 = performance(pred1, "tpr", "fpr")
+
+#dflt_idx = which(round(predict(ridgeFit1, newdata = c_test, type = "prob"))$bad == 1)
+preds = as.factor(ifelse((predict(ridgeFit1, newdata = c_test, type = "prob"))$bad > prb_default, "bad", "good"))
+confusionMatrix(preds, c_test$loan_status_numeric)
+```
+
+```{r}
+coef(lassoFit$finalModel)
+```
+
+```{r}
+freq = as.numeric(table(sample(1:5, N, 
+                replace=TRUE, prob=c(.3, .4, .5, .4, .3))))
+```
+
+```{r}
+wts = ifelse(c_train$loan_status_numeric == "bad", 4, 1)
+weightedFit1 = glm(loan_status_numeric~., family = "binomial", data = c_train, weights = wts)
+```
+
+```{r}
+summary(weightedFit1)
+```
+
+```{r}
+confusionMatrix(as.factor(ifelse(predict(weightedFit1, newdata = c_test, type = "response") > .5, "bad", "good")), reference = c_test$loan_status_numeric)
+```
+
+```{r}
+aic_back_model = step(weightedFit1, direction = "backward", trace = FALSE)
+```
+
+```{r}
+summary(aic_back_model)
+```
+
+```{r}
+length(coef(aic_back_model))
+length(coef(weightedFit1))
+
+coef(weightedFit1)[!names(coef(weightedFit1)) %in% names(coef(aic_back_model))]
+```
+
+
+Attempted AIC backwards selection and removed "loan_amnt", "term 60 months", "revol_bal", "total_acc". Removed code from report file because computation took upwards of 1.5hrs.
+
+```{r}
+confusionMatrix(as.factor(ifelse(predict(aic_back_model, newdata = c_test, type = "response") > .5, "bad", "good")), reference = c_test$loan_status_numeric)
+```
+
+```{r}
+aic_back_model$coefficients
+```
+
+```{r}
+coef_df = as.data.frame(aic_back_model$coefficients)
+state_row_idx = 42:91
+coef_no_state = aic_back_model$coefficients[-state_row_idx]
+sort(coef_no_state)
+```
+
+*home_ownership*: Any sort of home ownership (other, mortgage, own, rent) contribute the most to the probability of a "bad" loan, lack of home ownership decreases probability of a "bad" loan.
+*grade*: decrease in loan grades corresponds to higher probability of a "bad" loan. This makes sense as LC uses risk metrics to calculate loan grade.
+*purpose*: wedding and small business loans contribute to higher probability of "bad loan", and educational loans anf loans for major purchases and renewable energy tend to get paid off.
+*issue_yr*: loans with shorter lifespans are paid in full at a higher percentage than longer ones.
+**:
+
+
+```{r}
+aic_back_model
+```
+
+
+
+```{r}
+model_1_data$issue_yr
+```
+
+
+```{r}
+wts = ifelse(c_train$loan_status_numeric == "bad", 4, 1)
+
+final_model = glm(formula = loan_status_numeric ~ funded_amnt + funded_amnt_inv + 
+    installment + grade + emp_length + home_ownership + verification_status + 
+    purpose + addr_state + open_acc + initial_list_status + total_pymnt + 
+    total_pymnt_inv + total_rec_prncp + total_rec_int + last_pymnt_amnt + 
+    last_pymnt_yr + issue_yr, family = "binomial", data = c_train, 
+    weights = wts)
+```
+
+
+```{r}
+#library("sdat")
+preds = new_data[,1:ncol(new_data)-1]
+marginal.test(as.matrix(preds), new_data$loan_status_numeric)
+```
+
